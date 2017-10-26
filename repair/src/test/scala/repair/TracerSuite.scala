@@ -7,18 +7,20 @@ import org.junit.runners.JUnit4
 
 @RunWith(classOf[JUnit4])
 class TracerSuite {
-  // Statically guarantee a and b have same type.
-  def assertEquals[T](a: T)(b: T): Unit = Assert.assertEquals(a, b)
-
+  case class A(a: Int)
+  def assertEquals[T](expected: T)(obtained: T): Unit =
+    Assert.assertEquals(expected, obtained)
   @Test
-  def basic(): Unit = {
+  def unapply(): Unit = {
     val a = 2
     val b = 3
-    val obtained = Tracer.trace(b == a)
-    assertEquals(obtained)(
-      List(
-        TestValue("b", "Int", 3),
-        TestValue("a", "Int", 2)
-      ))
+    val obtained = Tracer.trace({
+      b == a
+    })
+    val expected = List(
+      TestValue("b", "Int", 3),
+      TestValue("a", "Int", 2)
+    )
+    assertEquals(expected)(obtained)
   }
 }
