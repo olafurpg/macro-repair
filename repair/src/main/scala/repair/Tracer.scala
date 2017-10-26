@@ -2,6 +2,7 @@ package repair
 
 import scala.language.experimental.macros
 
+import scala.macros.Untypechecker
 import scala.reflect.macros.whitebox
 import scala.tools.nsc.util
 
@@ -80,8 +81,14 @@ object Tracer {
         (($loggerName: ${tq""}) => ${tracingTransformer.transform(expr.tree)})
       )""")
 
-    val result =
-      c.Expr[List[TestValue]](c.resetLocalAttrs(q"""$func(..$trees)"""))
+//    val result =
+//      c.Expr[List[TestValue]](c.resetLocalAttrs(q"""$func(..$trees)"""))
+    val untypechecker = new Untypechecker[c.type](c)
+//    val tree = q"""$func(..$trees)"""
+    val tree = c.untypecheck(q"""$func(..$trees)""")
+//    val tree = untypechecker.untypecheck(q"""$func(..$trees)""")
+
+    val result = c.Expr[List[TestValue]](tree)
     println(showCode(result.tree))
     result
   }
