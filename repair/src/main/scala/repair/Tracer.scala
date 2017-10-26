@@ -30,23 +30,33 @@ object Tracer {
       func: c.Tree,
       exprs: c.Expr[T]*): c.Expr[List[TestValue]] = {
     import c.universe._
-    val loggerName = c.fresh(newTermName("$log"))
-    def wrapWithLoggedValue(tree: c.Tree, tpe: c.Type): c.universe.Tree = {
-      import c.universe._
-      val tempName = c.freshName[TermName]("$temp")
-      q"""{
-      val $tempName = $tree
-      $loggerName(repair.TestValue(
-        ${tree.toString()},
-        ${show(tpe)},
-        $tempName
-      ))
-      $tempName
-    }"""
-    }
+//    val loggerName = c.freshName("$log")
+//    val loggerSym =
+//      c.internal.newTermSymbol(c.internal.enclosingOwner, loggerName)
 
     import compat._
-    object tracingTransformer extends Transformer {
+    class tracingTransformer(loggerName: Symbol) extends Transformer {
+      def wrapWithLoggedValue(tree: c.Tree, tpe: c.Type): c.universe.Tree = {
+        import c.universe._
+        val expr = c.Expr(tree)
+        val tempExpr: c.Expr[TestValue => Unit] =
+          c.Expr(Ident(loggerName))
+        val name = c.Expr[String](Literal(Constant(tree.toString())))
+        reify {
+          val tmp = expr.splice
+          tempExpr.splice(TestValue(name.splice, name.splice, tmp))
+          tmp
+        }.tree
+//        q"""{
+//      val $tempName = $tree
+//      ${loggerName.name}(repair.TestValue(
+//        ${tree.toString()},
+//        ${show(tpe)},
+//        $tempName
+//      ))
+//      $tempName
+//    }"""
+      }
       override def transform(tree: Tree): Tree = {
 
         tree match {
@@ -85,13 +95,25 @@ object Tracer {
       }
     }
 
-    val trees = exprs.map(expr => q"""_root_.repair.AssertEntry(
-        ${expr.tree.pos.lineContent.trim},
-        (($loggerName: ${tq""}) => ${tracingTransformer.transform(expr.tree)})
-      )""")
+    val trees = exprs.map(expr =>
+      reify {
+        AssertEntry(
+          c.Expr[String](q"${expr.tree.pos.lineContent.trim}").splice,
+          loggername =>
+            c.Expr[T](new tracingTransformer(reify { loggername }.tree.symbol)
+                .transform(expr.tree))
+              .splice
+        )
+    })
+//      q"""_root_.repair.AssertEntry(
+//        ${},
+//        ((${loggerName.name}: ${tq""}) => ${tracingTransformer.transform(
+//        expr.tree)})
+//      )""")
 
-    val result =
-      c.Expr[List[TestValue]](c.resetLocalAttrs(q"""$func(..$trees)"""))
+    val tree = c.untypecheck(q"""$func(..$trees)""")
+//    val tree = q"""$func(..$trees)"""
+    val result = c.Expr[List[TestValue]](tree)
     println(showCode(result.tree))
     result
   }
