@@ -90,6 +90,7 @@ object Tracer {
         (($loggerName: ${tq""}) => ${tracingTransformer.transform(expr.tree)})
       )""")
 
+    // How do we get rid of resetLocalAttrs here?
     val result =
       c.Expr[List[TestValue]](c.resetLocalAttrs(q"""$func(..$trees)"""))
     println(showCode(result.tree))
