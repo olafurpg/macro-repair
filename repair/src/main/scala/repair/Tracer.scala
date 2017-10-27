@@ -28,6 +28,30 @@ object Tracer {
     buf.result()
   }
 
+  def apply2[T](c: whitebox.Context)(
+      func: c.Tree,
+      exprs: c.Expr[T]*): c.Expr[List[TestValue]] = {
+    import c.universe._
+    import internal.decorators._
+    c.inferImplicitValue()
+    //    def tpdVal(name: String, tpe: Type): ValDef = {
+    //      val nme = c.freshName[TermName](name)
+    //      val sym = internal
+    //        .newTermSymbol(c.internal.enclosingOwner, nme)
+    //        .setInfo(tpe)
+    //      val vll = internal.valDef(sym).setType(tpe)
+    //    }
+    exprs.map { expr =>
+      val function = Function()
+      q"""_root_.repair.AssertEntry(
+            ${expr.tree.pos.lineContent.trim},
+
+           )"""
+    }
+    val trees = List.empty[c.Tree]
+    c.Expr(q"$func(...$trees)")
+  }
+
   def apply[T](c: whitebox.Context)(
       func: c.Tree,
       exprs: c.Expr[T]*): c.Expr[List[TestValue]] = {
@@ -46,12 +70,14 @@ object Tracer {
       $tempName
     }"""
     }
+    val untypechecker = new Untypechecker[c.type](c)
 
     import compat._
     object tracingTransformer extends Transformer {
+      var stack = List.empty[Tree]
       override def transform(tree: Tree): Tree = {
-
         tree match {
+          case t: CaseDef => t
           case i @ Ident(name)
               if i.symbol.pos != NoPosition
                 && i.pos != NoPosition
@@ -66,12 +92,13 @@ object Tracer {
                 && !i.symbol.isImplementationArtifact
               // Don't trace "magic" identifiers with '$'s in them
                 && !name.toString.contains('$') =>
+            stack.foreach(untypechecker.untypecheckOne)
             wrapWithLoggedValue(tree, tree.tpe.widen)
-
-          // Don't recurse and trace the LHS of assignments
-          case i: Assign => super.transform(i.rhs)
-
-          case _ => super.transform(tree)
+          case _ =>
+            stack = tree :: stack
+            val result = super.transform(tree)
+            stack = stack.tail
+            result
         }
       }
     }
@@ -83,7 +110,6 @@ object Tracer {
 
 //    val result =
 //      c.Expr[List[TestValue]](c.resetLocalAttrs(q"""$func(..$trees)"""))
-    val untypechecker = new Untypechecker[c.type](c)
 //    val tree = q"""$func(..$trees)"""
     val tree = c.untypecheck(q"""$func(..$trees)""")
 //    val tree = untypechecker.untypecheck(q"""$func(..$trees)""")

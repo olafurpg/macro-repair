@@ -13,8 +13,11 @@ class TracerSuite {
   @Test
   def basic(): Unit = {
     val a = 2
-    val b = 3
-    val obtained = Tracer.trace(b == a)
+//    val b = 3
+    val obtained = Tracer.trace({
+      val List(b) = List(3)
+      b == a
+    })
     assertEquals(obtained)(
       List(
         TestValue("b", "Int", 3),
