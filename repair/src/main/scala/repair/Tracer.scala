@@ -7,6 +7,9 @@ import scala.reflect.macros.whitebox
 case class AssertEntry[T](label: String, thunk: (TestValue => Unit) => T)
 case class TestValue(name: String, tpeName: String, value: Any)
 
+
+
+
 /**
   * Macro implementation to take a block of code and trace through it,
   * converting it into an AssertEntry and inserting debug loggers.
