@@ -50,7 +50,6 @@ object Tracer {
       override def transform(tree: Tree): Tree = {
         tree match {
           case i @ Ident(name) if i.tpe <:< typeOf[Array[String]] =>
-            i.symbol.owner
             wrapWithLoggedValue(tree, tree.tpe.widen)
           case _ => super.transform(tree)
         }
