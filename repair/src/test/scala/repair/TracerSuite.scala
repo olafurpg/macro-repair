@@ -9,12 +9,10 @@ import org.junit.runners.JUnit4
 class TracerSuite {
   @Test
   def basic(): Unit = {
-    type MyString = String
-    val a: Array[String] = Array("a")
-    val b = 4
-    val obtained = Tracer.trace(
-      b.toString == a.head
-    )
+    val obtained = Tracer.trace {
+      val List(x) = List(2)
+      x == 2
+    }
     pprint.log(obtained)
   }
 

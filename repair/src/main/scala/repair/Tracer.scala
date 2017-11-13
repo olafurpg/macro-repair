@@ -9,6 +9,7 @@ case class AssertEntry[T](label: String, thunk: (TestValue => Unit) => T)
 case class TestValue(name: String, tpeName: String, value: Any)
 
 object Tracer {
+
   def trace[T](e: T): List[TestValue] = macro traceMacro[T]
 
   def traceMacro[T](c: whitebox.Context)(
@@ -16,6 +17,7 @@ object Tracer {
     import c.universe._
     apply(c)(q"repair.Tracer.traceRuntime", e)
   }
+
   def traceRuntime[T](entries: AssertEntry[T]*): List[TestValue] = {
     val buf = List.newBuilder[TestValue]
     entries.foreach { entry =>
@@ -43,18 +45,6 @@ object Tracer {
     }"""
     }
 
-    val OptionGet = typeOf[Option[_]].member(TermName("get"))
-
-    trait Macros {
-      type Term
-      type Env
-      def typecheck(term: Term)(implicit env: Env): tpd.Term
-      val tpd: tpd
-      trait tpd {
-        type Term
-        def termTpe(term: Term): Type
-      }
-    }
 
     object tracingTransformer extends Transformer {
       override def transform(tree: Tree): Tree = {
@@ -71,9 +61,8 @@ object Tracer {
         ${expr.tree.pos.lineContent.trim},
         (($loggerName: ${tq""}) => ${tracingTransformer.transform(expr.tree)})
       )""")
-    exprs.foreach(expr => pprint.log(showCode(expr.tree)))
 
-    // How do we get rid of resetLocalAttrs here?
+    // How do we get rid of untypecheck here?
     val result = c.Expr[List[TestValue]](c.untypecheck(q"""$func(..$trees)"""))
     println(showCode(result.tree, printTypes = true))
     result
