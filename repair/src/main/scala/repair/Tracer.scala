@@ -2,20 +2,15 @@ package repair
 
 import scala.language.experimental.macros
 
+import scala.collection.mutable
 import scala.reflect.macros.whitebox
 
 case class AssertEntry[T](label: String, thunk: (TestValue => Unit) => T)
 case class TestValue(name: String, tpeName: String, value: Any)
 
-
-
-
-/**
-  * Macro implementation to take a block of code and trace through it,
-  * converting it into an AssertEntry and inserting debug loggers.
-  */
 object Tracer {
   def trace[T](e: T): List[TestValue] = macro traceMacro[T]
+
   def traceMacro[T](c: whitebox.Context)(
       e: c.Expr[T]): c.Expr[List[TestValue]] = {
     import c.universe._
@@ -48,41 +43,25 @@ object Tracer {
     }"""
     }
 
-    import compat._
+    val OptionGet = typeOf[Option[_]].member(TermName("get"))
+
+    trait Macros {
+      type Term
+      type Env
+      def typecheck(term: Term)(implicit env: Env): tpd.Term
+      val tpd: tpd
+      trait tpd {
+        type Term
+        def termTpe(term: Term): Type
+      }
+    }
+
     object tracingTransformer extends Transformer {
       override def transform(tree: Tree): Tree = {
-
         tree match {
-          case i @ Ident(name)
-              if i.symbol.pos != NoPosition
-                && i.pos != NoPosition
-              // only trace identifiers coming from the same file,
-              // since those are the ones people probably care about
-                && i.symbol.pos.source == i.pos.source
-              // Don't trace methods, since you cannot just print them "standalone"
-              // without providing arguments
-                && !i.symbol.isMethod
-              // Don't trace identifiers which are synthesized by the compiler
-              // as part of the language implementation
-                && !i.symbol.isImplementationArtifact
-              // Don't trace "magic" identifiers with '$'s in them
-                && !name.toString.contains('$') =>
+          case i @ Ident(name) if i.tpe <:< typeOf[Array[String]] =>
+            i.symbol.owner
             wrapWithLoggedValue(tree, tree.tpe.widen)
-//          case i: Typed =>
-//            i.tpe match {
-//              case t: AnnotatedType
-//                 Don't worry about multiple chained annotations for now...
-//                if t.annotations.map(_.tpe) == Seq(typeOf[utest.asserts.Show]) =>
-//
-//                val newTpe = t.underlying
-//
-//                wrapWithLoggedValue(c)(tree, loggerName, newTpe.widen)
-//              case _ => super.transform(tree)
-//            }
-
-          // Don't recurse and trace the LHS of assignments
-          case i: Assign => super.transform(i.rhs)
-
           case _ => super.transform(tree)
         }
       }
@@ -92,11 +71,11 @@ object Tracer {
         ${expr.tree.pos.lineContent.trim},
         (($loggerName: ${tq""}) => ${tracingTransformer.transform(expr.tree)})
       )""")
+    exprs.foreach(expr => pprint.log(showCode(expr.tree)))
 
     // How do we get rid of resetLocalAttrs here?
-    val result =
-      c.Expr[List[TestValue]](c.resetLocalAttrs(q"""$func(..$trees)"""))
-    println(showCode(result.tree))
+    val result = c.Expr[List[TestValue]](c.untypecheck(q"""$func(..$trees)"""))
+    println(showCode(result.tree, printTypes = true))
     result
   }
 
