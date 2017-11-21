@@ -1,0 +1,4 @@
+<plugin>
+  <name>socrates</name>
+  <classname>socrates.SocratesPlugin</classname>
+</plugin>
