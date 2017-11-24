@@ -6,6 +6,7 @@ import scala.reflect.macros.compiler.DefaultMacroCompiler
 import scala.tools.nsc.Global
 import scala.tools.nsc.plugins.Plugin
 import scala.reflect.internal.{Flags => gf}
+import scala.util.control.NonFatal
 
 class SocratesMacro extends scala.annotation.StaticAnnotation
 class Term
@@ -20,6 +21,7 @@ class SocratesPlugin(val global: Global) extends Plugin { self =>
   import global._
   import analyzer._
   import global._
+  import treeInfo._
   object SocratesMacroPlugin extends global.analyzer.MacroPlugin {
     private lazy val pluginMacroClassloader: ClassLoader = {
       val classpath = global.classPath.asURLs
@@ -73,6 +75,8 @@ class SocratesPlugin(val global: Global) extends Plugin { self =>
       }
     }
 
+    private case class MacroImplResolutionException(pos: Position, msg: String)
+        extends Exception
     override def pluginsTypedMacroBody(
         typer: global.analyzer.Typer,
         ddef: global.analyzer.global.DefDef
@@ -102,8 +106,32 @@ class SocratesPlugin(val global: Global) extends Plugin { self =>
           val macroDdef: self.global.DefDef = macroDdef1
         } with DefaultMacroCompiler {
           override def resolveMacroImpl: global.Tree = {
+            def tryCompile(
+                compiler: MacroImplRefCompiler): scala.util.Try[Tree] = {
+              try {
+                println("Trying compile!")
+                // +scalac deviation
+                /* compiler.validateMacroImplRef(); skip validation */
+                // -scalac deviation
+                scala.util.Success(compiler.macroImplRef)
+              } catch {
+                case NonFatal(ex)
+                    if ex.getClass.getName.contains("MacroImplResolution") =>
+                  scala.util.Failure(ex)
+              }
+            }
             println("resolving... ")
-            super.resolveMacroImpl
+            val vanillaImplRef = MacroImplRefCompiler(
+              macroDdef.rhs.duplicate,
+              isImplBundle = false)
+            val vanillaResult = tryCompile(vanillaImplRef)
+            try {
+              vanillaResult.get
+            } catch {
+              case MacroImplResolutionException(pos, msg) =>
+                context.error(pos, msg)
+                EmptyTree
+            }
           }
         }
         val macroImplRef = macroCompiler.resolveMacroImpl
@@ -153,18 +181,22 @@ class SocratesPlugin(val global: Global) extends Plugin { self =>
         expandee: global.analyzer.global.Tree
     ): Option[global.analyzer.MacroArgs] = {
       println("=> pluginsMacroArgs")
-      return None
-      expandee.symbol.annotations.collectFirst {
-        case a if a.tpe <:< typeOf[SocratesMacro] =>
-          val treeInfo.Applied(core, targs, argss) = expandee
-          val prefix = core match {
-            case Select(qual, _) => qual; case _ => EmptyTree
-          }
-          val context = expandee.attachments
-            .get[MacroRuntimeAttachment]
-            .flatMap(_.macroContext)
-            .getOrElse(mkMacroContext(typer, prefix, expandee))
-          global.analyzer.MacroArgs(context, null :: Nil)
+      val isSocratesMacro =
+        expandee.symbol.annotations.exists(_.tpe <:< typeOf[SocratesMacro])
+      if (!isSocratesMacro) None
+      else {
+        val standardArgs = standardMacroArgs(typer, expandee)
+        println("ARGS " + standardArgs.others)
+        val treeInfo.Applied(core, targs, argss) = expandee
+        val prefix = core match {
+          case Select(qual, _) => qual; case _ => EmptyTree
+        }
+        val socratesContext = expandee.attachments
+          .get[MacroRuntimeAttachment]
+          .flatMap(_.macroContext)
+          .getOrElse(mkMacroContext(typer, prefix, expandee))
+        println("CTX " + socratesContext)
+        Some(standardArgs.copy(c = socratesContext))
       }
     }
   }
