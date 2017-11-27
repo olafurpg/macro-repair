@@ -10,7 +10,8 @@ class TracerSuite {
   @Test
   def basic(): Unit = {
     val b = "banana"
-    val obtained = Main.identity(b)
+    val c = "banana"
+    val obtained = Main.identity(b, b, c)
     Assert.assertEquals("b", obtained)
   }
 
