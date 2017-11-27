@@ -7,8 +7,8 @@ import socrates.api._
 
 object Main {
   @socrates.SocratesMacro
-  def identity(e: Any*): String = macro impl
-  def impl(c: SocratesContext)(e: Term*): Term = {
-    Lit.String(e.map(_.syntax).mkString("+"))
+  def identity[A](e: A): String = macro impl[A]
+  def impl[T: SocratesTypeTag](c: SocratesContext)(e: Term): Term = {
+    Lit.String(typeTag[T].toString)
   }
 }

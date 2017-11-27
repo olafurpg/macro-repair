@@ -1,5 +1,7 @@
 package socrates
 
+import scala.language.higherKinds
+
 import scala.reflect.internal.util.ScalaClassLoader
 import scala.reflect.macros.blackbox
 import scala.reflect.macros.compiler.DefaultMacroCompiler
@@ -20,6 +22,8 @@ trait SocratesContext {
 object api {
   var context: SocratesContext = _
   type Term
+  type SocratesTypeTag[T]
+  def typeTag[T](implicit ev: SocratesTypeTag[T]): SocratesTypeTag[T] = ev
   object Lit {
     def String(string: String): Term =
       context.LitString(string).asInstanceOf[Term]
@@ -92,11 +96,72 @@ class SocratesPlugin(val global: Global) extends Plugin { self =>
       }
     }
 
+    object SocratesTypeTag {
+      val socratesTypeTag = typeOf[api.SocratesTypeTag[_]]
+      val SocratedType = socratesTypeTag.typeSymbol
+
+      def unapply(arg: Type): Boolean = {
+        println(s"TPE: $arg <:< ${arg.<:<(socratesTypeTag)}")
+        arg <:< socratesTypeTag
+      }
+    }
+
     object SocratesTreeType {
       lazy val socratesTerm = typeOf[api.Term]
       def unapply(arg: Type): Boolean = {
         println(s"TPE: $arg <:< ${arg.<:<(socratesTerm)}")
         arg <:< socratesTerm
+      }
+    }
+
+    def isSocratesContext(tp: Type): Boolean = {
+      println(s"TPTPTP: $tp")
+      tp <:< typeOf[SocratesContext]
+    }
+
+    def transformSocratesTypeTagEvidenceParams(
+        macroImplRef: Tree,
+        transform: (Symbol, Symbol) => Symbol): List[List[Symbol]] = {
+      val runDefinitions = currentRun.runDefinitions
+      import runDefinitions._
+
+      val MacroContextUniverse = definitions.MacroContextUniverse
+      val treeInfo.MacroImplReference(isBundle, _, _, macroImpl, _) =
+        macroImplRef
+      val paramss = macroImpl.paramss
+      val ContextParam = paramss match {
+        case Nil | _ :+ Nil =>
+          NoSymbol // no implicit parameters in the signature => nothing to do
+        case _ if isBundle => macroImpl.owner.tpe member nme.c
+        case (cparam :: _) :: _ if definitions.isMacroContextType(cparam.tpe) => cparam
+        // +scalac deviation
+        case (cparam :: _) :: _ if isSocratesContext(cparam.tpe) => cparam
+        // -scalac deviation
+        case _ =>
+          NoSymbol // no context parameter in the signature => nothing to do
+      }
+      def transformTag(param: Symbol): Symbol = {
+        println("PARAM: " + param.tpe.dealias)
+        param.tpe.dealias match {
+          case TypeRef(
+              SingleType(SingleType(_, ContextParam), MacroContextUniverse),
+              WeakTypeTagClass,
+              targ :: Nil) =>
+            transform(param, targ.typeSymbol)
+          // +scalac deviation
+          case TypeRef(_, SocratesTypeTag.SocratedType, targ :: Nil) =>
+            transform(param, targ.typeSymbol)
+          // -scalac deviation
+          case _ => param
+        }
+      }
+      ContextParam match {
+        case NoSymbol => paramss
+        case _ =>
+          paramss.last map transformTag filter (_.exists) match {
+            case Nil => paramss.init
+            case transformed => paramss.init :+ transformed
+          }
       }
     }
 
@@ -136,11 +201,10 @@ class SocratesPlugin(val global: Global) extends Plugin { self =>
           }
         }
 
-        val transformed = transformTypeTagEvidenceParams(
+        val transformed = transformSocratesTypeTagEvidenceParams(
           macroImplRef,
           (param, tparam) => tparam)
-        mmap(transformed)(p =>
-          if (p.isTerm) fingerprint(p.info) else Tagged(p.paramPos))
+        mmap(transformed)(p => if (p.isTerm) fingerprint(p.info) else Tagged(p.paramPos))
       }
 
       println(s"SIGNATURE: $signature")
@@ -188,7 +252,7 @@ class SocratesPlugin(val global: Global) extends Plugin { self =>
         typer: global.analyzer.Typer,
         ddef: global.analyzer.global.DefDef
     ): Option[global.analyzer.global.Tree] = {
-      println("pluginsTypedMacroBody")
+      println("=> pluginsTypedMacroBody")
       val untypedMacroImplRef = ddef.rhs.duplicate
       val isSocratesMacro = ddef.mods.annotations.exists { annot =>
         typer.typed(annot).tpe <:< typeOf[SocratesMacro]
@@ -304,7 +368,10 @@ class SocratesPlugin(val global: Global) extends Plugin { self =>
       if (!isSocratesMacro) None
       else {
         val standardArgs = standardMacroArgs(typer, expandee)
-        println("ARGS " + standardArgs.others)
+        val macroDef = expandee.symbol
+        val binding = loadMacroImplBinding(macroDef).get
+        val signature = binding.signature.tail
+        println("ARGS " + standardArgs)
         val treeInfo.Applied(core, targs, argss) = expandee
         val prefix = core match {
           case Select(qual, _) => qual; case _ => EmptyTree
@@ -313,6 +380,31 @@ class SocratesPlugin(val global: Global) extends Plugin { self =>
           .get[MacroRuntimeAttachment]
           .flatMap(_.macroContext)
           .getOrElse(mkMacroContext(typer, prefix, expandee))
+        println(s"SIGNATURE $signature")
+        val tags = signature.flatten
+          .collect {
+            case f if f.isTag =>
+              f.paramPos
+          }
+          .map(paramPos => {
+            val targ = binding.targs(paramPos).tpe.typeSymbol
+            val tpe = if (targ.isTypeParameterOrSkolem) {
+              if (targ.owner == macroDef) {
+                // doesn't work when macro def is compiled separately from its usages
+                // then targ is not a skolem and isn't equal to any of macroDef.typeParams
+                // val argPos = targ.deSkolemize.paramPos
+                val argPos =
+                  macroDef.typeParams.indexWhere(_.name == targ.name)
+                targs(argPos).tpe
+              } else
+                targ.tpe.asSeenFrom(
+                  if (prefix == EmptyTree) macroDef.owner.tpe else prefix.tpe,
+                  macroDef.owner)
+            } else
+              targ.tpe
+            socratesContext.WeakTypeTag(tpe)
+          })
+        println(s"TAGS: $tags")
         api.context = socratesContext.asInstanceOf[SocratesContext]
         val args = standardArgs.copy(c = socratesContext)
         println("CTX " + socratesContext)
