@@ -2,30 +2,14 @@ package repair
 
 import scala.language.experimental.macros
 
-import scala.reflect.macros.blackbox
 import socrates.SocratesContext
-import socrates.Term
+import socrates.api._
 
 object Main {
   @socrates.SocratesMacro
-  def syntax(e: Any): String = macro impl2
-
-  def impl(c: blackbox.Context)(e: c.Tree): c.Tree = {
-    import c.universe._
-    val result = Literal(Constant(showCode(e)))
-    println(result)
-    result
-  }
-
-  def impl2(c: SocratesContext)(e: Term): Term = {
-    println("HELLO!")
-    c match {
-      case s: socrates.SocratesContext =>
-        println("SMACRO! " + s.message)
-      case s =>
-        println(":(  " + s.getClass)
-    }
-    println(e)
-    e
+  def identity(e: Any): String = macro impl
+  def impl(c: SocratesContext)(e: Term): Term = {
+    println(s"E: ${e.syntax}")
+    Lit.String(e.syntax)
   }
 }
